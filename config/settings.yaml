@@ -1,0 +1,45 @@
+# Tunable knobs for the RAG half. PLACEHOLDERS ONLY in M0 — nothing reads this file
+# yet; the loader arrives with the walking skeleton in M1.
+#
+# Why a YAML file rather than constants in code: these are the values that get swept
+# during the eval milestones (M2+). Every one of them is a number some later milestone
+# is expected to move, and each move must be justified by a measured delta — so they
+# live in one diffable place, not scattered through the modules that use them.
+#
+# Secrets never live here. Keys come from .env (see .env.example).
+
+corpus:
+  # Which AR6 products are in scope. M1 ingests exactly one SPM; M8 expands.
+  reports: []          # e.g. ["AR6-SYR"]
+  language: en         # the corpus is English-only; French is an edge concern (CLAUDE.md 1)
+
+chunking:
+  # M1: naive fixed-size with overlap. M4 replaces this with section-aware chunking.
+  strategy: fixed      # fixed | section_aware
+  chunk_size: 1000     # characters
+  chunk_overlap: 150   # characters; overlap so a claim split across a boundary survives
+
+embeddings:
+  # Multilingual on purpose: it costs nothing now and avoids re-embedding the whole
+  # corpus when French questions are added later (CLAUDE.md 1, 4). Fixed in M1.
+  model: null          # e.g. "BAAI/bge-m3" — decided and pinned in M1
+  normalize: true      # unit-normalize so dot product == cosine similarity
+  batch_size: 32
+
+retrieval:
+  top_k: 8             # chunks handed to the generation agent
+  candidate_k: 40      # wider first pass, narrowed by the reranker (M5)
+  rerank: false        # M5 lever, off until eval justifies it
+  hybrid: false        # M5 lever: dense + BM25, for scenario codes like SSP5-8.5
+
+thresholds:
+  # The refusal gate (M6). Score scales are retriever-specific, so this is calibrated
+  # per retriever against the gold set, never assumed portable.
+  min_score_to_answer: null
+  min_chunks_to_answer: 1
+
+models:
+  # Aliases only — the alias -> concrete model mapping lives in app/config.py's
+  # Deployment registry, and the model slug itself comes from env (M1).
+  generation: smart
+  judge: fast
