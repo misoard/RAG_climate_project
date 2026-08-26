@@ -1,0 +1,27 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Environments ---
+.venv/
+venv/
+
+# --- Secrets (only .env.example is tracked) ---
+.env
+.env.*
+!.env.example
+
+# --- Corpus & derived artifacts (large, reproducible: never committed) ---
+data/raw/
+data/processed/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
