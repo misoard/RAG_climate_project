@@ -1,0 +1,21 @@
+[project]
+name = "ipcc-rag"
+version = "0.1.0"
+description = "Grounded, cited question answering over the IPCC AR6 corpus."
+requires-python = ">=3.12"
+dependencies = [
+    "agentic-core",
+    "pydantic>=2.13.4",
+]
+
+# src-layout: the three first-party packages live under src/ and are installed into
+# the venv, so `uv run python -m app.workflow` (M1) works from anywhere in the repo.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/contracts", "src/rag", "src/app"]
+
+[tool.uv.sources]
+agentic-core = { git = "https://github.com/misoard/agentic-core.git" }
