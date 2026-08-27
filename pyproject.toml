@@ -5,7 +5,11 @@ description = "Grounded, cited question answering over the IPCC AR6 corpus."
 requires-python = ">=3.12"
 dependencies = [
     "agentic-core",
+    "numpy>=2.5.2",
     "pydantic>=2.13.4",
+    "pymupdf>=1.28.2",
+    "pyyaml>=6.0.3",
+    "sentence-transformers>=6.0.0",
 ]
 
 # src-layout: the three first-party packages live under src/ and are installed into
@@ -19,3 +23,15 @@ packages = ["src/contracts", "src/rag", "src/app"]
 
 [tool.uv.sources]
 agentic-core = { git = "https://github.com/misoard/agentic-core.git" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+# auto: async test functions run without a per-test decorator. The whole call
+# path is async (the core is), so nearly every test would need one otherwise.
+asyncio_mode = "auto"
+testpaths = ["tests"]

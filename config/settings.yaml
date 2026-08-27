@@ -10,7 +10,7 @@
 
 corpus:
   # Which AR6 products are in scope. M1 ingests exactly one SPM; M8 expands.
-  reports: []          # e.g. ["AR6-SYR"]
+  reports: ["AR6-SYR"]  # M1 ingests exactly this one SPM; M8 expands
   language: en         # the corpus is English-only; French is an edge concern (CLAUDE.md 1)
 
 chunking:
@@ -22,7 +22,10 @@ chunking:
 embeddings:
   # Multilingual on purpose: it costs nothing now and avoids re-embedding the whole
   # corpus when French questions are added later (CLAUDE.md 1, 4). Fixed in M1.
-  model: null          # e.g. "BAAI/bge-m3" — decided and pinned in M1
+  # Pinned in M1. Multilingual + 8192-token context: the long context is what
+  # M4's section-aware chunks will want, and picking a multilingual model now is
+  # what avoids re-embedding the whole corpus when French questions arrive.
+  model: BAAI/bge-m3
   normalize: true      # unit-normalize so dot product == cosine similarity
   batch_size: 32
 
