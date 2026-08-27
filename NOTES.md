@@ -213,6 +213,15 @@ imprecise. Following the code:
    `PromptSpec` + `load_prompt()` loader to fill it has to be copied from
    `how_to_start/agents.py` into our own `app/agents.py`.
 
+5. **The Gateway keeps its router private.** It is passed as `Gateway(router=...)`
+   but stored as `_router`, so a test that wants to inspect calls must keep its own
+   reference to the `FakeRouter` rather than reading it back off the gateway.
+6. **The schema instruction is appended as the *last* message.** `router.calls[i]
+   ["messages"][-1]` is the Gateway's "respond with JSON matching this schema" system
+   message, *not* the rendered user prompt. To assert on what the agent actually said,
+   join all messages or select by `role`. (Both of these were found by M1's tests
+   failing, not by reading -- worth the reminder that this file is notes, not proof.)
+
 One contract observation from our side: `Answer.citations` and
 `Answer.supporting_chunk_ids` default to empty lists, which is what makes a refusal
 (`refused=True`, no citations) valid output rather than a schema violation. That is
