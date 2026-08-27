@@ -5,6 +5,7 @@ description = "Grounded, cited question answering over the IPCC AR6 corpus."
 requires-python = ">=3.12"
 dependencies = [
     "agentic-core",
+    "certifi>=2026.7.22",
     "numpy>=2.5.2",
     "pydantic>=2.13.4",
     "pymupdf>=1.28.2",

@@ -1,0 +1,12 @@
+{
+  "AR6-SYR": {
+    "bytes": 5552060,
+    "document_layer": "SPM",
+    "downloaded": "2026-08-27",
+    "filename": "IPCC_AR6_SYR_SPM.pdf",
+    "report": "AR6-SYR",
+    "sha256": "3e347d04913c8fcc180c10efec372681554f3d735a7f0b2e6c7d991ddbb29c11",
+    "url": "https://www.ipcc.ch/report/ar6/syr/downloads/report/IPCC_AR6_SYR_SPM.pdf",
+    "working_group": "SYR"
+  }
+}

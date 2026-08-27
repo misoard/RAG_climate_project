@@ -735,6 +735,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "agentic-core" },
+    { name = "certifi" },
     { name = "numpy" },
     { name = "pydantic" },
     { name = "pymupdf" },
@@ -751,6 +752,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "agentic-core", git = "https://github.com/misoard/agentic-core.git" },
+    { name = "certifi", specifier = ">=2026.7.22" },
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pymupdf", specifier = ">=1.28.2" },
