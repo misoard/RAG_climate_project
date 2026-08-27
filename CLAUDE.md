@@ -125,33 +125,38 @@ ipcc-rag/
 
 ## 6. The contracts (define in M0, keep stable)
 
-Concrete starting definitions — refine names in M0 but keep the shape. These are the interfaces the two halves meet at.
+These were refined and frozen in M0. **`src/contracts/models.py` is the source of truth** — this block mirrors it, so update both together. Changing anything here is a deliberate act, not a side effect of another change.
 
 ```python
-from typing import Literal, Protocol
-from pydantic import BaseModel
+from typing import Literal, Protocol, runtime_checkable
+from pydantic import BaseModel, Field
+
+WorkingGroup  = Literal["WG1","WG2","WG3","SYR","SR1.5","SROCC","SRCCL"]
+DocumentLayer = Literal["SPM","TS","chapter","FAQ"]
 
 # ---- the unit of retrieval ----
 class Chunk(BaseModel):
     chunk_id: str
     text: str
     report: str                                    # "AR6-SYR", "AR6-WG1", ...
-    working_group: Literal["WG1","WG2","WG3","SYR","SR1.5","SROCC","SRCCL"]
-    document_layer: Literal["SPM","TS","chapter","FAQ"]
+    working_group: WorkingGroup
+    document_layer: DocumentLayer
     chapter: str | None = None
     section: str | None = None
-    page: int
+    page_start: int                                # a chunk may straddle a page break;
+    page_end: int                                  # both required, equal for one-page chunks
     is_headline_statement: bool = False
-    confidence_terms: list[str] = []               # e.g. ["high confidence"]
-    likelihood_terms: list[str] = []               # e.g. ["very likely"]
-    scenarios_mentioned: list[str] = []            # e.g. ["SSP1-2.6"]
+    confidence_terms: list[str] = Field(default_factory=list)   # e.g. ["high confidence"]
+    likelihood_terms: list[str] = Field(default_factory=list)   # e.g. ["very likely"]
+    scenarios_mentioned: list[str] = Field(default_factory=list) # e.g. ["SSP1-2.6"]
     figure_or_table_ref: str | None = None
 
 class RetrievedChunk(BaseModel):
     chunk: Chunk
-    score: float
+    score: float                  # scale is retriever-specific; never compared across retrievers
 
 # ---- the retrieval boundary ----
+@runtime_checkable
 class Retriever(Protocol):
     async def retrieve(
         self, query: str, k: int = 8, filters: dict | None = None
@@ -159,10 +164,11 @@ class Retriever(Protocol):
 
 # ---- the generation boundary (the Agent's typed I/O) ----
 class Citation(BaseModel):
+    chunk_id: str                 # which retrieved chunk this claim came from
     report: str
-    document_layer: str
+    document_layer: DocumentLayer # Literal, so the JSON Schema tells the model the legal values
     section: str | None = None
-    page: int
+    page: int                     # the single page the cited claim sits on
 
 class GenerationInput(BaseModel):
     question: str
@@ -171,13 +177,20 @@ class GenerationInput(BaseModel):
 
 class Answer(BaseModel):
     text: str
-    citations: list[Citation]
+    citations: list[Citation] = Field(default_factory=list)
     qualifiers_preserved: bool    # did the answer keep IPCC confidence/likelihood language?
     refused: bool                 # true when the corpus doesn't support an answer
-    supporting_chunk_ids: list[str]
+    supporting_chunk_ids: list[str] = Field(default_factory=list)
 ```
 
-The orchestration `State` carries: `question → list[RetrievedChunk] → Answer`. The generation `Agent` uses `GenerationInput` as `input_model` and `Answer` as `output_model`, so the Gateway's re-prompt loop enforces the citation/qualifier structure for free.
+**Invariants** — mechanically checkable, which is the whole point of carrying `chunk_id` on a citation. Enforce them in M6:
+
+1. `{c.chunk_id for c in citations} ⊆ set(supporting_chunk_ids)` — a chunk may inform the answer without being pinned to one sentence, but nothing may be cited that isn't listed as supporting.
+2. `set(supporting_chunk_ids) ⊆ set(GenerationInput.allowed_chunk_ids)` — citing a chunk the model was never shown is fabrication, caught by set membership rather than fuzzy string matching.
+3. `chunk.page_start ≤ citation.page ≤ chunk.page_end` for the chunk each citation names.
+4. `refused=True` with empty `citations` is **valid** output, not a schema violation — refusal is a first-class, evaluable outcome (M2 refusal correctness).
+
+The orchestration `State` carries: `question → list[RetrievedChunk] → Answer`. The generation `Agent` uses `GenerationInput` as `input_model` and `Answer` as `output_model`, so the Gateway's re-prompt loop enforces the citation/qualifier structure for free. Note the Agent returns a `Completion`, not an `Answer` — the typed value is `completion.parsed` (see `NOTES.md`).
 
 ---
 
