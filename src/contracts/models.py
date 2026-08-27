@@ -29,7 +29,7 @@ DocumentLayer = Literal["SPM", "TS", "chapter", "FAQ"]
 class Chunk(BaseModel):
     """One retrievable passage plus everything needed to cite and qualify it.
 
-    The metadata is not decoration. ``page``/``section``/``report`` are what make an
+    The metadata is not decoration. ``page_start``/``section``/``report`` are what make an
     answer checkable; the ``*_terms`` lists are what let us detect (M6) that an answer
     dropped the IPCC's own hedging and stated a "likely" range as a certainty.
     """
@@ -43,7 +43,12 @@ class Chunk(BaseModel):
     document_layer: DocumentLayer
     chapter: str | None = None
     section: str | None = None
-    page: int
+    # A chunk can straddle a page break -- routine once M4 chunks on section
+    # boundaries. Both are required and simply equal for a single-page chunk, so
+    # "which pages does this cover" always has an answer with no None-check at
+    # every call site.
+    page_start: int
+    page_end: int
 
     # --- assessment signals: populated properly in M3 ---
     # A headline statement is the report's own top-level claim; worth knowing because
@@ -87,11 +92,22 @@ class Retriever(Protocol):
 
 
 class Citation(BaseModel):
-    """A pointer a reader can follow back into the PDF."""
+    """A pointer a reader can follow back into the PDF, tied to the chunk it came from.
 
+    ``chunk_id`` is what makes a citation checkable *individually*: it must be one of
+    ``GenerationInput.allowed_chunk_ids``, so a fabricated citation is caught by set
+    membership rather than by fuzzy-matching report/section/page strings back to chunks.
+    """
+
+    chunk_id: str
     report: str
-    document_layer: str
+    # The same closed vocabulary as Chunk. A Literal here is not a stricter demand on
+    # the model so much as a clearer one: the Gateway puts the allowed values into the
+    # JSON Schema it sends, so the model is told the options instead of guessing them.
+    document_layer: DocumentLayer
     section: str | None = None
+    # The single page the cited claim sits on. It must fall within the source chunk's
+    # [page_start, page_end] -- that containment is the M6 consistency check.
     page: int
 
 
@@ -122,6 +138,9 @@ class Answer(BaseModel):
     qualifiers_preserved: bool
     # True when the corpus does not support an answer.
     refused: bool
+    # Answer-level provenance. Invariant: a superset of {c.chunk_id for c in citations}.
+    # A chunk may inform the answer without being pinned to one sentence, but nothing
+    # may be cited that is not listed here.
     supporting_chunk_ids: list[str] = Field(default_factory=list)
 
 
