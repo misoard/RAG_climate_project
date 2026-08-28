@@ -86,8 +86,24 @@ def _sha256(path: Path) -> str:
 
 
 def _record(source: Source, path: Path) -> None:
-    """Add or update this source's entry in the manifest."""
+    """Add or update this source's entry in the manifest.
+
+    ``downloaded`` records when these *bytes* were obtained, not when the manifest
+    was last written -- so a cache hit must not touch it. Re-running ingestion is
+    a read, and a provenance field that silently advances on every read asserts
+    something false, which is worse than not recording it at all. The date is
+    therefore carried forward whenever the hash shows the file is unchanged, and
+    only reset when the content actually differs (a re-issued PDF, or a manual
+    replacement in data/raw/).
+    """
     entries = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
+    digest = _sha256(path)
+    previous = entries.get(source.report, {})
+    obtained = (
+        previous["downloaded"]
+        if previous.get("sha256") == digest and "downloaded" in previous
+        else date.today().isoformat()
+    )
     entries[source.report] = {
         "report": source.report,
         "working_group": source.working_group,
@@ -95,8 +111,8 @@ def _record(source: Source, path: Path) -> None:
         "url": source.url,
         "filename": path.name,
         "bytes": path.stat().st_size,
-        "sha256": _sha256(path),
-        "downloaded": date.today().isoformat(),
+        "sha256": digest,
+        "downloaded": obtained,
     }
     MANIFEST.write_text(json.dumps(entries, indent=2, sort_keys=True) + "\n")
 
