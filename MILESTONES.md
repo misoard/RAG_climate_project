@@ -47,15 +47,131 @@ Each milestone lists: **Goal**, **Build**, **Tools**, **Done when**, and **Stop 
 **Goal:** you can score retrieval and answer quality, so every later change is justified by numbers. This comes *before* any optimization.
 
 **Build:**
-- `eval/build_gold_set.py`: start with ~15–25 items — a few hand-written Q/A with known source locations, a couple derived from AR6 chapter FAQs, and **at least three unanswerable questions** (to test refusal). Store as `data/eval/gold_set.jsonl`.
-- `eval/run_eval.py`: drive the **core's `eval/harness.py`**. Metrics: (a) retrieval hit rate, (b) faithfulness, (c) refusal correctness, (d) uncertainty preservation.
+- `eval/build_gold_set.py`: ~15–25 items — a few hand-written Q/A with known source locations, a couple derived from AR6 chapter FAQs, and **at least three unanswerable questions** (to test refusal). Store as `data/eval/gold_set.jsonl`, schema below.
+- `eval/run_eval.py`: drive the **core's `eval/harness.py`**, with the scorers defined below.
 - Record the **baseline** on the M1 skeleton.
+
+### Gold set schema — label by span, never by `chunk_id`
+
+```jsonc
+{
+  "id": "warming-since-preindustrial",
+  "question": "How much has global surface temperature risen since pre-industrial times?",
+  "answerable": true,
+  "evidence": [
+    { "span": "1.09 [0.95 to 1.20]", "report": "AR6-SYR", "page": 4 }
+  ],
+  "must_preserve": ["high confidence"],
+  "note": "SPM A.1.1"
+}
+```
+
+**`chunk_id` must never appear in the gold set.** Ids are ordinals assigned at build time
+(`AR6-SYR#0014`), so M3's re-parse and M4's re-chunk renumber every one of them — labels
+would not merely break, they would silently point at *different text* and quietly flatter
+or wreck every number. `span` is a distinctive verbatim substring that must appear in the
+retrieved context; it survives re-chunking and re-parsing alike. `page` is the cross-check.
+
+Match spans on **whitespace-normalised** text (collapse runs of space/newline, normalise
+the PDF's en-dashes and non-breaking spaces) — the raw extraction's line breaks fall in
+different places after any parser change, which would otherwise fail every span.
+
+**A gold span must be unique in the corpus, and `build_gold_set.py` must verify it.**
+A span that occurs more than once scores a *false hit*: any retrieved chunk containing it
+counts, whether or not it is the evidence you meant. Measured on this SPM:
+
+| Candidate span | Occurrences | Verdict |
+|---|---|---|
+| `high confidence` | 205 | useless — hits on almost any chunk |
+| `1850-1900` | 20 | **false positives**, the obvious choice is the wrong one |
+| `1.09 [0.95 to 1.20]` | 1 | uniquely identifies A.1.1 — use this |
+
+Prefer numeric values with their uncertainty brackets: they are the most distinctive strings
+in an IPCC report and the thing an answer most needs to get right. Fail the gold-set build
+on any span that is not unique, rather than discovering it as an inflated hit rate later.
+
+**Watch footnote markers when choosing boundaries.** They are fused to the value they
+follow, with no separator:
+
+```
+Global surface temperature was 1.09 [0.95 to 1.20]°C5 higher in 2011-2020 than 1850-19006
+                                                  ↑                                    ↑
+                                            footnote 5                          footnote 6
+```
+
+So a span ending in `°C` breaks here, and the year at this location literally reads `19006`.
+That is a live hazard for answers and not only for eval — a model reading this can report
+the year as 19006. **Stripping footnote markers belongs in M3's parse**; until it lands,
+expect the fusion in both retrieved text and generated answers.
+
+### Retrieval metrics — scored on `list[RetrievedChunk]`, before generation
+
+Let `R_k` be the concatenated text of the top *k* retrieved chunks.
+
+| Scorer | Definition | Why |
+|---|---|---|
+| `hit_rate@k` | 1.0 if **any** gold span appears in `R_k`, else 0.0 | Headline. The agent needs the evidence *present*, not necessarily first |
+| `recall@k` | fraction of the item's gold spans found in `R_k` | The one that matters when a question needs several pieces of evidence |
+| `mrr` | 1 / rank of the first chunk containing any gold span (0 if absent) | The metric a reranker moves — see the trap below |
+| `precision@k` | fraction of the top *k* chunks containing a gold span | Report from M2, optimise only from M4 |
+
+Compute `recall` and `hit_rate` at **k = 1, 3, 8, 20**. The spread diagnoses the failure:
+absent at k=20 is an embedding or chunking problem; present at 20 but not at 8 is a
+*ranking* problem and the reranker is the right lever.
+
+**Recall is weighted over precision, deliberately.** A missing chunk yields a wrong answer
+or a false refusal and is unrecoverable; a spare irrelevant chunk costs tokens and some
+distraction. The asymmetry stops being so lopsided at M4: on this corpus an irrelevant
+chunk carrying *a different scenario's* numbers invites the model to blend SSP1-2.6 and
+SSP5-8.5 figures, which is the flattened-table hazard in another form.
+
+> **Trap — do not judge the reranker on `hit_rate@8`.** A cross-encoder reorders *within*
+> the candidate set. If the right chunk was already rank 6 of 8, `hit_rate@8` does not move
+> at all and the lever looks worthless. `mrr` is what moves. M5 must judge each lever on the
+> metric that lever can actually affect.
+
+### Answer metrics
+
+| Scorer | Kind | Definition |
+|---|---|---|
+| `citation_validity` | mechanical | Every `Citation.chunk_id` ∈ `allowed_chunk_ids`; its `page` within that chunk's `[page_start, page_end]`; `{c.chunk_id} ⊆ supporting_chunk_ids` |
+| `faithfulness` | judged | LLM judge: is each claim supported by the chunk it cites? |
+| `refusal_correctness` | mechanical | `answerable` → `refused is False`; unanswerable → `refused is True` |
+| `uncertainty_preservation` | mechanical (M3+) | Every term in `must_preserve` appears in `answer.text` |
+
+`citation_validity` is **free** — it is the M0 contract invariants (`CLAUDE.md §6`) turned
+into a scorer, and it catches a fabricated citation by set membership rather than judgement.
+Prefer mechanical scorers wherever one exists: they are cheaper, deterministic, and immune
+to judge drift.
+
+**Report `refusal_correctness` in both directions separately, never blended.** A system that
+refuses everything scores perfectly on the unanswerable set alone.
+
+> **Trap — `Answer.qualifiers_preserved` is not the uncertainty metric.** It is the model's
+> *self-report*, so scoring it measures the model's opinion of itself. The real check is
+> mechanical and needs M3's detected `confidence_terms`/`likelihood_terms` on the cited
+> chunks. Until then, score against the gold item's `must_preserve` list, and track the
+> self-report separately as a **calibration** signal: how often does the flag agree with the
+> mechanical result?
+
+### Reporting discipline
+
+Every scorer returns a `Score` normalised 0–1 (the harness contract; see `NOTES.md §4`).
+Always print **raw counts beside every rate**, and the harness's `errors` count — a case
+that raises is excluded from the means and could otherwise silently flatter a metric.
+
+With 20 items **one question is 5 percentage points**. A move from 0.72 to 0.76 is a single
+item flipping. Treat deltas smaller than ~2 items as noise, and say so in the milestone
+review rather than banking them as progress.
 
 **Tools:** `agentic-core` eval harness; `FakeRouter` for any offline pieces.
 
-**Done when:** `uv run python -m eval.run_eval` prints a scored report you trust, with a saved baseline to compare against.
+**Done when:** `uv run python -m eval.run_eval` prints a scored report you trust, with a
+saved baseline to compare against, and the gold set contains no `chunk_id`.
 
-**Stop & teach:** what each metric means and why this gate exists *now* rather than later. Show the baseline and predict which metric each upcoming milestone should move.
+**Stop & teach:** what each metric means and why this gate exists *now* rather than later.
+Show the baseline and predict which metric each upcoming milestone should move — and which
+it should *not*, which is the more useful prediction.
 
 ---
 
@@ -101,7 +217,10 @@ Each milestone lists: **Goal**, **Build**, **Tools**, **Done when**, and **Stop 
 
 **Tools:** `pgvector`/`Qdrant`, `sentence-transformers` cross-encoder, a BM25 lib.
 
-**Done when:** retrieval hit rate is meaningfully above the M2 baseline **and each lever's individual contribution is quantified**.
+**Done when:** retrieval quality is meaningfully above the M2 baseline **and each lever's
+individual contribution is quantified against the metric that lever can move** — the store
+swap should shift nothing but latency, the reranker shows up in `mrr` rather than
+`hit_rate@8`, and hybrid/filtering show up in `recall@k`.
 
 **Stop & teach:** after *each* sub-step, report its measured contribution. Some may not help on this corpus — keeping only what the numbers justify is the lesson.
 

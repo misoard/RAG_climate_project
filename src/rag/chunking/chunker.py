@@ -73,8 +73,18 @@ def chunk_pages(
                 Chunk(
                     # Ordinal rather than a content hash: ids stay readable and sort
                     # into document order, which makes eval failures much easier to
-                    # eyeball. The cost is that re-chunking renumbers everything --
-                    # fine, because ids are only ever valid within one build.
+                    # eyeball. The cost is that re-chunking renumbers everything.
+                    #
+                    # So: a chunk_id is valid ONLY within one build. Never persist one
+                    # anywhere that outlives the build -- above all not in the eval gold
+                    # set (see MILESTONES.md M2). M3 re-parses and M4 re-chunks, and a
+                    # stored id would not fail loudly afterwards; it would silently point
+                    # at different text and quietly corrupt every number measured with
+                    # it. Reference chunks by a quoted span instead.
+                    #
+                    # A content hash would not rescue this: different chunk text hashes
+                    # differently, so the id still moves. The instability is inherent to
+                    # re-chunking, not to the id scheme.
                     chunk_id=f"{source.report}#{len(chunks):04d}",
                     text=body,
                     report=source.report,
